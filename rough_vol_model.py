@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 from sklearn.linear_model import LinearRegression
+import config
 
 try:
     import fracbm
@@ -22,7 +23,6 @@ def compute_hurst_dfa(series: np.ndarray) -> float:
     if len(series) < 100:
         return 0.5
     
-    # Cumulative sum of deviations from mean
     y = np.cumsum(series - np.mean(series))
     
     scales = np.logspace(1, np.log10(len(series)//4), 20, dtype=int)
@@ -100,18 +100,13 @@ class RoughVolatilityModel:
         if len(values) < 22:
             return {"forecast": np.nan, "hurst": self.hurst_exponent, "is_rough": self.is_rough}
         
-        # HAR features
         daily = values[-1]
         weekly = np.mean(values[-5:]) if len(values) >= 5 else daily
         monthly = np.mean(values[-22:]) if len(values) >= 22 else daily
         
-        # Roughness adjustment: if rough (H < 0.45), volatility reverts faster
-        # Adjust HAR coefficients based on Hurst exponent
         if self.is_rough:
-            # Rough volatility: more weight on recent (daily), less on long memory
             w_daily, w_weekly, w_monthly = 0.6, 0.3, 0.1
         else:
-            # Smooth volatility: standard HAR weights
             w_daily, w_weekly, w_monthly = 0.3, 0.4, 0.3
         
         forecast = w_daily * daily + w_weekly * weekly + w_monthly * monthly
@@ -126,23 +121,18 @@ class RoughVolatilityModel:
     def compute_expected_return(self, returns: pd.Series, volatility_forecast: float) -> float:
         """
         Compute roughness-adjusted expected return.
-        Rough assets (H < 0.45) tend to have faster mean reversion, so expected return
-        is adjusted based on recent momentum and roughness.
         """
         if volatility_forecast is None or np.isnan(volatility_forecast):
             return 0.0
         
-        recent_return = returns.iloc[-21:].mean() * 252  # Annualized
+        recent_return = returns.iloc[-21:].mean() * 252
         
         if self.is_rough:
-            # Rough assets: mean-reversion dominates, expected return is negative of recent momentum
             expected_return = -0.5 * recent_return
         else:
-            # Smooth assets: momentum persists
             expected_return = 0.3 * recent_return
         
-        # Scale by volatility forecast (higher vol = lower confidence)
-        vol_penalty = volatility_forecast / 0.20  # normalize by ~20% annual vol
+        vol_penalty = volatility_forecast / 0.20
         expected_return = expected_return / (1 + vol_penalty)
         
         return expected_return
