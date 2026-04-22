@@ -18,6 +18,7 @@ st.markdown("""
     .hero-ticker { font-size: 4rem; font-weight: 800; }
     .rough-badge { background: #dc3545; color: white; padding: 0.2rem 0.8rem; border-radius: 20px; font-size: 0.9rem; }
     .smooth-badge { background: #28a745; color: white; padding: 0.2rem 0.8rem; border-radius: 20px; font-size: 0.9rem; }
+    .explain-box { background: #f8f9fa; border-radius: 12px; padding: 1.5rem; margin-top: 2rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -105,3 +106,27 @@ for tab, key in zip(tabs, universe_keys):
                 })
             df_all = pd.DataFrame(all_rows).sort_values("Exp Return (Rough Adj)", ascending=False)
             st.dataframe(df_all, use_container_width=True, hide_index=True)
+
+        # --- Explanation expander at the bottom of each tab ---
+        with st.expander("📘 What does 'Roughness-Adjusted' mean?"):
+            st.markdown("""
+            ### Hurst Exponent & Rough Volatility
+            
+            The **Hurst exponent (H)** measures the long‑memory of a time series:
+            - **H = 0.5**: Random walk (no memory)
+            - **H > 0.5**: Persistent / trending (smooth volatility)
+            - **H < 0.5**: Anti‑persistent / mean‑reverting (**rough volatility**)
+            
+            This engine estimates H for each ETF's realized volatility series.
+            
+            ### Roughness-Adjusted Expected Return
+            
+            | Volatility Type | Hurst Range | Expected Return Adjustment |
+            |-----------------|-------------|----------------------------|
+            | **Rough** | H < {threshold} | Mean‑reversion dominates: `Exp Return = -0.5 × Recent Return` |
+            | **Smooth** | H ≥ {threshold} | Momentum persists: `Exp Return = +0.3 × Recent Return` |
+            
+            Both are scaled by `1 / (1 + Vol_Forecast / 0.20)` to penalize high‑volatility regimes.
+            
+            **Why this matters:** Rough volatility implies faster mean reversion, so chasing recent momentum is dangerous. The engine tilts away from recent winners when volatility is rough.
+            """.format(threshold=config.ROUGHNESS_THRESHOLD))
