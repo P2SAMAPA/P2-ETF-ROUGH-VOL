@@ -28,44 +28,56 @@ def run_rough_vol():
         print(f"\n--- Processing Universe: {universe_name} ---")
         universe_results = {}
 
+        # Fetch data once per universe
         vol_df = data_manager.prepare_volatility_series(df_master, tickers)
-        if vol_df.empty:
+        returns_df = data_manager.prepare_returns_matrix(df_master, tickers)
+        
+        if vol_df.empty or returns_df.empty:
             continue
 
-        recent_vol = vol_df.iloc[-config.LOOKBACK_WINDOW:]
-
         for ticker in tickers:
-            print(f"  Estimating Hurst for {ticker}...")
-            if ticker not in recent_vol.columns:
+            if ticker not in vol_df.columns or ticker not in returns_df.columns:
                 continue
 
-            volatility_series = recent_vol[ticker].dropna()
-            if len(volatility_series) < config.MIN_OBSERVATIONS:
+            # CRITICAL FIX: Pass the FULL volatility history to the model.
+            # The new rolling Hurst exponent requires deep history to calculate 
+            # a rolling 252-day window properly.
+            full_volatility_series = vol_df[ticker].dropna()
+            if len(full_volatility_series) < config.MIN_OBSERVATIONS:
                 continue
 
             model = RoughVolatilityModel(
                 hurst_method=config.HURST_METHOD,
                 roughness_threshold=config.ROUGHNESS_THRESHOLD
             )
-            success = model.fit(volatility_series)
+            
+            print(f"  Estimating rolling Hurst for {ticker} (Length: {len(full_volatility_series)})...")
+            success = model.fit(full_volatility_series)
             if not success:
                 continue
 
-            vol_forecast = model.forecast_volatility(volatility_series)
-            returns = data_manager.prepare_returns_series(df_master, ticker)
-            recent_returns = returns.iloc[-config.LOOKBACK_WINDOW:]
+            # Forecast also uses the full series for deep EWM spans
+            vol_forecast = model.forecast_volatility(full_volatility_series)
+            
+            # Slice returns only for the final expected return calculation
+            recent_returns = returns_df[ticker].iloc[-config.LOOKBACK_WINDOW:]
 
             exp_ret = model.compute_expected_return(recent_returns, vol_forecast["forecast"])
             exp_ret_simple = compute_expected_return_simple(recent_returns)
 
+            # CRITICAL FIX: Cast numpy types to native python floats for JSON serialization.
+            # The new continuous weight math generates np.float64, which crashes json.dumps.
+            weights = vol_forecast.get("weights", {})
+            clean_weights = {k: float(v) for k, v in weights.items()}
+
             universe_results[ticker] = {
                 "ticker": ticker,
-                "hurst_exponent": vol_forecast["hurst"],
-                "is_rough": vol_forecast["is_rough"],
-                "vol_forecast": vol_forecast["forecast"],
-                "expected_return_raw": exp_ret_simple,
-                "expected_return_rough_adj": exp_ret,
-                "weights": vol_forecast.get("weights", {})
+                "hurst_exponent": float(vol_forecast["hurst"]),
+                "is_rough": bool(vol_forecast["is_rough"]),
+                "vol_forecast": float(vol_forecast["forecast"]) if not np.isnan(vol_forecast["forecast"]) else None,
+                "expected_return_raw": float(exp_ret_simple),
+                "expected_return_rough_adj": float(exp_ret),
+                "weights": clean_weights
             }
 
         all_results[universe_name] = universe_results
