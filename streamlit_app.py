@@ -49,7 +49,7 @@ if data:
     st.sidebar.markdown(f"**Run Date:** {data.get('run_date', 'Unknown')}")
 
 st.markdown('<div class="main-header">📊 P2Quant Rough Volatility</div>', unsafe_allow_html=True)
-st.markdown('<div>Fractional Dynamics – Hurst Exponent & Roughness-Adjusted Ranking</div>', unsafe_allow_html=True)
+st.markdown('<div>Fractional Dynamics – Rolling Hurst Exponent & Roughness-Adjusted Ranking</div>', unsafe_allow_html=True)
 
 if data is None:
     st.warning("No data available.")
@@ -117,16 +117,19 @@ for tab, key in zip(tabs, universe_keys):
             - **H > 0.5**: Persistent / trending (smooth volatility)
             - **H < 0.5**: Anti‑persistent / mean‑reverting (**rough volatility**)
             
-            This engine estimates H for each ETF's realized volatility series.
+            This engine estimates a **Rolling 252-day Hurst** exponent for each ETF's realized volatility series, allowing it to adapt to regime shifts rather than assuming a static state.
             
-            ### Roughness-Adjusted Expected Return
+            ### Roughness-Adjusted Expected Return (v2.0)
             
-            | Volatility Type | Hurst Range | Expected Return Adjustment |
-            |-----------------|-------------|----------------------------|
-            | **Rough** | H < {threshold} | Mean‑reversion dominates: `Exp Return = -0.5 × Recent Return` |
-            | **Smooth** | H ≥ {threshold} | Momentum persists: `Exp Return = +0.3 × Recent Return` |
+            Instead of static if/else logic, the engine uses **continuous scaling**:
+            - **Momentum Multiplier**: `1.2 × (H - 0.5)`. 
+              - At H=0.8 (Smooth), it aggressively follows momentum (+0.36 multiplier).
+              - At H=0.5 (Random), it flattens exposure (0.0 multiplier).
+              - At H=0.2 (Rough), it fades recent momentum (-0.36 multiplier).
             
-            Both are scaled by `1 / (1 + Vol_Forecast / 0.20)` to penalize high‑volatility regimes.
+            - **Volatility Forecasting**: Uses Exponentially Weighted Moving Averages (EWM) instead of flat moving averages to better capture volatility clustering.
+            - **Dynamic HAR Weights**: Allocates daily/weekly/monthly weights continuously based on H, rather than hard-coded brackets.
+            - **Adaptive Vol Penalty**: Scales the penalty relative to the asset's *own* recent realized volatility, removing arbitrary hardcoded baselines.
             
-            **Why this matters:** Rough volatility implies faster mean reversion, so chasing recent momentum is dangerous. The engine tilts away from recent winners when volatility is rough.
-            """.format(threshold=config.ROUGHNESS_THRESHOLD))
+            **Why this matters:** Rough volatility implies faster mean reversion, so chasing recent momentum is dangerous. The engine continuously tilts away from recent winners as volatility becomes rougher.
+            """)
