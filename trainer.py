@@ -28,20 +28,16 @@ def run_rough_vol():
         print(f"\n--- Processing Universe: {universe_name} ---")
         universe_results = {}
 
-        # Fetch data once per universe
+        # Fetch volatility matrix once per universe
         vol_df = data_manager.prepare_volatility_series(df_master, tickers)
-        returns_df = data_manager.prepare_returns_matrix(df_master, tickers)
-        
-        if vol_df.empty or returns_df.empty:
+        if vol_df.empty:
             continue
 
         for ticker in tickers:
-            if ticker not in vol_df.columns or ticker not in returns_df.columns:
+            if ticker not in vol_df.columns:
                 continue
 
             # CRITICAL FIX: Pass the FULL volatility history to the model.
-            # The new rolling Hurst exponent requires deep history to calculate 
-            # a rolling 252-day window properly.
             full_volatility_series = vol_df[ticker].dropna()
             if len(full_volatility_series) < config.MIN_OBSERVATIONS:
                 continue
@@ -56,17 +52,16 @@ def run_rough_vol():
             if not success:
                 continue
 
-            # Forecast also uses the full series for deep EWM spans
             vol_forecast = model.forecast_volatility(full_volatility_series)
             
-            # Slice returns only for the final expected return calculation
-            recent_returns = returns_df[ticker].iloc[-config.LOOKBACK_WINDOW:]
+            # Fetch returns for this specific ticker
+            returns = data_manager.prepare_returns_series(df_master, ticker)
+            recent_returns = returns.iloc[-config.LOOKBACK_WINDOW:]
 
             exp_ret = model.compute_expected_return(recent_returns, vol_forecast["forecast"])
             exp_ret_simple = compute_expected_return_simple(recent_returns)
 
-            # CRITICAL FIX: Cast numpy types to native python floats for JSON serialization.
-            # The new continuous weight math generates np.float64, which crashes json.dumps.
+            # Cast numpy types to native python floats for JSON serialization
             weights = vol_forecast.get("weights", {})
             clean_weights = {k: float(v) for k, v in weights.items()}
 
